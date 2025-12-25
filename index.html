@@ -1,0 +1,242 @@
+<!-- 
+===================================================================
+HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
+===================================================================
+-->
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HR Match Tool</title>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://apis.google.com/js/api.js" async defer></script>
+    <style>
+        :root { --primary:#4285F4; --bg:#f8fafe; --text:#202124; }
+        body { margin:0; font-family:'Segoe UI',sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+        
+        /* HEADER */
+        header { background:#fff; height:60px; padding:0 20px; border-bottom:1px solid #ddd; display:flex; align-items:center; justify-content:space-between; }
+        .brand { font-weight:bold; font-size:1.2rem; } .brand span { color:var(--primary); }
+        .controls { display:flex; gap:10px; }
+        button, select { padding:8px 12px; border:1px solid #ccc; border-radius:6px; background:#fff; cursor:pointer; }
+        .btn-primary { background:var(--primary); color:#fff; border:none; }
+        
+        /* MAIN */
+        main { flex:1; position:relative; overflow:hidden; padding:20px; display:flex; justify-content:center; }
+        #drop-zone { position:absolute; inset:0; background:var(--bg); z-index:50; display:flex; flex-direction:column; align-items:center; justify-content:center; transition:0.2s; }
+        #drop-zone.active { background:#e8f0fe; }
+        .upload-box { border:2px dashed #ccc; padding:40px; border-radius:12px; background:#fff; text-align:center; }
+        
+        /* CARD */
+        #card-container { width:100%; max-width:1400px; height:100%; position:relative; perspective:1000px; }
+        .card { position:absolute; inset:0; background:#fff; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.1); display:flex; overflow:hidden; transition:transform 0.4s ease, opacity 0.3s; }
+        
+        .preview-pane { flex:7; background:#525659; position:relative; }
+        .preview-pane iframe { width:100%; height:100%; border:none; }
+        .no-preview { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#fff; flex-direction:column; }
+        
+        .info-pane { flex:3; min-width:320px; border-left:1px solid #eee; padding:20px; display:flex; flex-direction:column; background:#fff; overflow-y:auto; }
+        .input-group { margin-bottom:15px; }
+        .input-group label { display:block; font-size:0.85rem; color:#666; margin-bottom:5px; font-weight:600; }
+        .input-group input, .input-group textarea { width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box; }
+        
+        /* ACTIONS */
+        .actions { margin-top:auto; display:flex; justify-content:center; gap:15px; padding-top:20px; }
+        .btn-circle { width:50px; height:50px; border-radius:50%; border:none; font-size:1.5rem; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:transform 0.2s; box-shadow:0 2px 5px rgba(0,0,0,0.1); }
+        .btn-circle:hover { transform:scale(1.1); }
+        .nope { background:#fff; color:#EA4335; border:1px solid #eee; }
+        .like { background:#34A853; color:#fff; }
+        .star { background:#FBBC05; color:#fff; }
+
+        /* MODAL */
+        .modal { position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:100; display:none; align-items:center; justify-content:center; }
+        .modal-content { background:#fff; padding:25px; border-radius:12px; width:500px; max-width:90%; }
+        .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#333; color:#fff; padding:10px 20px; border-radius:20px; opacity:0; transition:0.3s; z-index:200; pointer-events:none; }
+        
+        .overlay-icon { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:5rem; font-weight:bold; opacity:0; pointer-events:none; z-index:10; }
+        .hidden { display:none !important; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="brand"><span>HR</span>Match</div>
+        <div class="controls">
+            <select id="pos-select" onchange="App.changePos()"></select>
+            <button class="btn-primary" onclick="document.getElementById('file-in').click()">➕ Thêm CV</button>
+            <button onclick="UI.toggleSettings()">⚙️</button>
+        </div>
+    </header>
+
+    <main>
+        <input type="file" id="file-in" class="hidden" multiple accept=".pdf,.doc,.docx" onchange="App.addFiles(this.files)">
+        <div id="drop-zone">
+            <div class="upload-box">
+                <div style="font-size:3rem">📂</div>
+                <h3>Kéo thả hoặc Chọn CV</h3>
+                <button class="btn-primary" onclick="document.getElementById('file-in').click()">Chọn File</button>
+                <div id="auth-stt" style="margin-top:10px;color:red;font-size:0.9rem">Chưa kết nối Drive</div>
+            </div>
+        </div>
+        <div id="card-container" class="hidden"></div>
+    </main>
+
+    <!-- SETTINGS MODAL -->
+    <div id="settings-modal" class="modal">
+        <div class="modal-content">
+            <h3>Cài đặt</h3>
+            <div class="input-group">
+                <label>Google Client ID</label>
+                <input id="cfg-id" placeholder="xxxx.apps.googleusercontent.com">
+            </div>
+            <div class="input-group">
+                <label>Cấu hình Vị trí (JSON)</label>
+                <textarea id="cfg-json" rows="8" style="font-family:monospace"></textarea>
+            </div>
+            <div style="text-align:right">
+                <button class="btn-primary" onclick="App.saveCfg()">Lưu & Tải lại</button>
+                <button onclick="UI.toggleSettings()">Đóng</button>
+            </div>
+        </div>
+    </div>
+    
+    <div id="toast" class="toast"></div>
+
+    <script>
+        const KEY = 'hr_match_config';
+        let CFG = JSON.parse(localStorage.getItem(KEY)) || {
+            clientId: '',
+            positions: { "Mặc định": { accepted: "", shortlist: "" } }
+        };
+
+        const STATE = { files: [], idx: 0, pos: '', token: null };
+
+        const App = {
+            init: () => {
+                // UI Setup
+                document.getElementById('cfg-id').value = CFG.clientId;
+                document.getElementById('cfg-json').value = JSON.stringify(CFG.positions, null, 2);
+                const sel = document.getElementById('pos-select');
+                Object.keys(CFG.positions).forEach(p => {
+                    let opt = document.createElement('option'); opt.value = p; opt.innerText = p; sel.add(opt);
+                });
+                STATE.pos = sel.value;
+
+                // Drag Drop
+                const dz = document.getElementById('drop-zone');
+                dz.ondragover = e => { e.preventDefault(); dz.classList.add('active'); };
+                dz.ondragleave = () => dz.classList.remove('active');
+                dz.ondrop = e => { e.preventDefault(); dz.classList.remove('active'); App.addFiles(e.dataTransfer.files); };
+
+                // Google Init
+                if(CFG.clientId) window.onload = App.gInit;
+            },
+            gInit: () => {
+                try {
+                    google.accounts.oauth2.initTokenClient({
+                        client_id: CFG.clientId,
+                        scope: 'https://www.googleapis.com/auth/drive.file',
+                        callback: (r) => {
+                            if(r.error) return UI.toast("Lỗi Auth: " + r.error);
+                            STATE.token = r.access_token;
+                            document.getElementById('auth-stt').innerText = "✅ Drive Connected";
+                            document.getElementById('auth-stt').style.color = "green";
+                            UI.toast("Đã kết nối Google Drive!");
+                        }
+                    }).requestAccessToken();
+                } catch(e) { console.error(e); }
+            },
+            saveCfg: () => {
+                try {
+                    const pos = JSON.parse(document.getElementById('cfg-json').value);
+                    const id = document.getElementById('cfg-id').value;
+                    localStorage.setItem(KEY, JSON.stringify({ clientId: id, positions: pos }));
+                    location.reload();
+                } catch { alert("JSON Lỗi!"); }
+            },
+            changePos: () => STATE.pos = document.getElementById('pos-select').value,
+            addFiles: (fs) => {
+                const arr = Array.from(fs).map(f => ({ file: f, name: f.name, type: f.name.split('.').pop().toLowerCase() }));
+                STATE.files = [...STATE.files, ...arr];
+                document.getElementById('drop-zone').classList.add('hidden');
+                document.getElementById('card-container').classList.remove('hidden');
+                UI.render();
+            },
+            decide: (type) => {
+                if(STATE.idx >= STATE.files.length) return;
+                const card = document.getElementById('card-active');
+                
+                // Anim
+                card.style.transform = type === 'ok' ? 'translate(100%, 20px) rotate(10deg)' : 
+                                      (type === 'no' ? 'translate(-100%, 20px) rotate(-10deg)' : 'translateY(-100%)');
+                card.style.opacity = 0;
+
+                // Logic
+                const f = STATE.files[STATE.idx];
+                const rename = document.getElementById('inp-name').value || f.name;
+                const posData = CFG.positions[STATE.pos];
+                const folderId = type === 'ok' ? posData.accepted : (type === 'star' ? posData.shortlist : null);
+
+                if(folderId && STATE.token) {
+                    const meta = { name: `[${STATE.pos}] ${rename}`, parents: [folderId] };
+                    const form = new FormData();
+                    form.append('metadata', new Blob([JSON.stringify(meta)], {type:'application/json'}));
+                    form.append('file', f.file);
+                    
+                    fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+                        method: 'POST', headers: {'Authorization': 'Bearer ' + STATE.token}, body: form
+                    }).then(res => res.json()).then(d => {
+                        if(d.error) UI.toast("Lỗi upload: " + d.error.message);
+                        else UI.toast("Đã lưu vào Drive!");
+                    });
+                }
+
+                setTimeout(() => { STATE.idx++; UI.render(); }, 300);
+            }
+        };
+
+        const UI = {
+            render: () => {
+                const c = document.getElementById('card-container');
+                c.innerHTML = '';
+                if(STATE.idx >= STATE.files.length) {
+                    c.innerHTML = `<div style="text-align:center;padding-top:100px"><h2>Hết hồ sơ!</h2><button class="btn-primary" onclick="document.getElementById('file-in').click()">Thêm hồ sơ</button></div>`;
+                    return;
+                }
+                const f = STATE.files[STATE.idx];
+                const url = URL.createObjectURL(f.file);
+                
+                let preview = `<div class="no-preview"><div>${f.type.toUpperCase()}</div><a href="${url}" target="_blank" style="color:#aaf">Mở file</a></div>`;
+                if(f.type === 'pdf') preview = `<iframe src="${url}#toolbar=0"></iframe>`;
+
+                c.innerHTML = `
+                <div class="card" id="card-active">
+                    <div class="preview-pane">${preview}</div>
+                    <div class="info-pane">
+                        <h3>${f.name}</h3>
+                        <div class="input-group"><label>Tên ứng viên</label><input id="inp-name" value="${f.name.replace(/\.[^/.]+$/, "")}"></div>
+                        <div class="input-group"><label>Ghi chú</label><textarea rows="3"></textarea></div>
+                        <div class="actions">
+                            <button class="btn-circle nope" onclick="App.decide('no')">✖️</button>
+                            <button class="btn-circle star" onclick="App.decide('star')">⭐</button>
+                            <button class="btn-circle like" onclick="App.decide('ok')">❤️</button>
+                        </div>
+                    </div>
+                </div>`;
+                
+                // Key listener for this card
+                document.onkeydown = (e) => {
+                    if(e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+                    if(e.key==='ArrowRight') App.decide('ok');
+                    if(e.key==='ArrowLeft') App.decide('no');
+                    if(e.key==='ArrowUp') App.decide('star');
+                };
+            },
+            toggleSettings: () => { const m=document.getElementById('settings-modal'); m.style.display=(m.style.display==='flex'?'none':'flex'); },
+            toast: (msg) => { const t=document.getElementById('toast'); t.innerText=msg; t.style.opacity=1; setTimeout(()=>t.style.opacity=0,3000); }
+        };
+
+        App.init();
+    </script>
+</body>
+</html>
