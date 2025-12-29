@@ -56,6 +56,15 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
         
         .overlay-icon { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:5rem; font-weight:bold; opacity:0; pointer-events:none; z-index:10; }
         .hidden { display:none !important; }
+    
+        /* SETTINGS TABLE */
+        .pos-table { width:100%; border-collapse:collapse; font-size:0.9rem; }
+        .pos-table th, .pos-table td { border:1px solid #eee; padding:6px; vertical-align:top; }
+        .pos-table th { background:#fafafa; text-align:left; font-weight:700; }
+        .pos-table input { width:100%; padding:7px; border:1px solid #ddd; border-radius:6px; box-sizing:border-box; }
+        .btn-danger { background:#fff; border:1px solid #f1c0c0; color:#d93025; }
+        .hint { font-size:0.85rem; color:#666; margin-top:6px; line-height:1.35; }
+
     </style>
 </head>
 <body>
@@ -91,47 +100,131 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
     </main>
 
     <!-- SETTINGS MODAL -->
-    <div id="settings-modal" class="modal">
+    <div id="settings-modal" class="modal" onclick="UI.onModalBackdrop(event)">
         <div class="modal-content">
-            <h3>Cài đặt</h3>
+            <h3 style="margin-top:0">Cài đặt</h3>
+
             <div class="input-group">
                 <label>Google Client ID</label>
                 <input id="cfg-id" placeholder="xxxx.apps.googleusercontent.com">
+                <div class="hint">Bạn chỉ cần set 1 lần. Nếu gửi cho team, bạn có thể tạo “link chia sẻ” để mọi người mở là tự set.</div>
             </div>
+
             <div class="input-group">
-                <label>Cấu hình Vị trí (JSON)</label>
-                <textarea id="cfg-json" rows="8" style="font-family:monospace"></textarea>
+                <label>Vị trí & Folder Drive</label>
+                <div style="overflow:auto; max-height:320px;">
+                    <table class="pos-table">
+                        <thead>
+                            <tr>
+                                <th style="min-width:140px;">Vị trí</th>
+                                <th style="min-width:160px;">Accepted folder</th>
+                                <th style="min-width:160px;">Shortlist folder</th>
+                                <th style="width:44px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="pos-tbody"></tbody>
+                    </table>
+                </div>
+                <div class="hint">Tip: Bạn có thể dán <b>URL folder Drive</b> hoặc <b>Folder ID</b>. App sẽ tự trích ID.</div>
+                <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+                    <button onclick="UI.addPosRow()">➕ Thêm vị trí</button>
+                    <button onclick="UI.copyShareLink()">🔗 Tạo link chia sẻ</button>
+                    <button class="btn-danger" onclick="UI.resetCfg()">↩️ Reset cấu hình</button>
+                </div>
             </div>
-            <div style="text-align:right">
-                <button class="btn-primary" onclick="App.saveCfg()">Lưu & Tải lại</button>
+
+            <div style="text-align:right; display:flex; justify-content:flex-end; gap:10px; flex-wrap:wrap;">
+                <button class="btn-primary" onclick="App.saveCfg()">💾 Lưu</button>
                 <button onclick="UI.toggleSettings()">Đóng</button>
             </div>
         </div>
+    </div>
     </div>
     
     <div id="toast" class="toast"></div>
 
     <script>
         const KEY = 'hr_match_config';
-        let CFG = JSON.parse(localStorage.getItem(KEY)) || {
+
+        const DEFAULT_CFG = {
             clientId: '',
             positions: { "Mặc định": { accepted: "", shortlist: "" } }
         };
+
+        const Util = {
+            // Accept: full folder URL, "id=...", or raw folder id
+            extractFolderId: (s) => {
+                if(!s) return "";
+                const t = String(s).trim();
+                const m1 = t.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+                if(m1) return m1[1];
+                const m2 = t.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+                if(m2) return m2[1];
+                const m3 = t.match(/^[a-zA-Z0-9_-]{10,}$/);
+                if(m3) return t;
+                return t; // fallback (still lets user try)
+            },
+            b64EncodeUtf8: (str) => btoa(unescape(encodeURIComponent(str))),
+            b64DecodeUtf8: (b64) => decodeURIComponent(escape(atob(b64))),
+            normalizeCfg: (cfg) => {
+                const out = { ...DEFAULT_CFG, ...(cfg || {}) };
+                out.clientId = (out.clientId || '').trim();
+                out.positions = out.positions && typeof out.positions === 'object' ? out.positions : { ...DEFAULT_CFG.positions };
+                // normalize each position entry
+                const normPos = {};
+                Object.entries(out.positions).forEach(([k,v]) => {
+                    const name = String(k || '').trim();
+                    if(!name) return;
+                    const obj = v && typeof v === 'object' ? v : {};
+                    normPos[name] = {
+                        accepted: (obj.accepted || '').trim(),
+                        shortlist: (obj.shortlist || '').trim()
+                    };
+                });
+                if(Object.keys(normPos).length === 0) normPos["Mặc định"] = { accepted:"", shortlist:"" };
+                out.positions = normPos;
+                return out;
+            }
+        };
+
+        const importCfgFromUrlIfAny = () => {
+            try {
+                const sp = new URLSearchParams(location.search);
+                const b64 = sp.get('cfg');
+                if(!b64) return;
+                const jsonStr = Util.b64DecodeUtf8(decodeURIComponent(b64));
+                const obj = JSON.parse(jsonStr);
+                const normalized = Util.normalizeCfg(obj);
+                localStorage.setItem(KEY, JSON.stringify(normalized));
+                // clean URL (remove cfg param) so people don't keep overwriting by accident
+                sp.delete('cfg');
+                const newUrl = location.pathname + (sp.toString() ? ('?' + sp.toString()) : '') + location.hash;
+                history.replaceState({}, '', newUrl);
+            } catch(e) {
+                console.warn("Không import được config từ link:", e);
+            }
+        };
+
+        importCfgFromUrlIfAny();
+
+        let CFG = Util.normalizeCfg(JSON.parse(localStorage.getItem(KEY) || "null"));
 
         const STATE = { files: [], idx: 0, pos: '', token: null };
 
         const App = {
             init: () => {
-                // UI Setup
-                document.getElementById('cfg-id').value = CFG.clientId;
-                document.getElementById('cfg-json').value = JSON.stringify(CFG.positions, null, 2);
+                // UI Setup (settings + positions)
+                UI.renderSettingsForm();
                 const sel = document.getElementById('pos-select');
+                sel.innerHTML = '';
                 Object.keys(CFG.positions).forEach(p => {
-                    let opt = document.createElement('option'); opt.value = p; opt.innerText = p; sel.add(opt);
+                    let opt = document.createElement('option');
+                    opt.value = p;
+                    opt.innerText = p;
+                    sel.add(opt);
                 });
-                STATE.pos = sel.value;
-
-                // Drag Drop
+                STATE.pos = sel.value || Object.keys(CFG.positions)[0] || 'Mặc định';
+// Drag Drop
                 const dz = document.getElementById('drop-zone');
                 dz.ondragover = e => { e.preventDefault(); dz.classList.add('active'); };
                 dz.ondragleave = () => dz.classList.remove('active');
@@ -209,12 +302,25 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
                 App.goHome();
             },
             saveCfg: () => {
-                try {
-                    const pos = JSON.parse(document.getElementById('cfg-json').value);
-                    const id = document.getElementById('cfg-id').value;
-                    localStorage.setItem(KEY, JSON.stringify({ clientId: id, positions: pos }));
-                    location.reload();
-                } catch { alert("JSON Lỗi!"); }
+                // Read from table UI (no JSON needed)
+                const id = (document.getElementById('cfg-id').value || '').trim();
+                const tbody = document.getElementById('pos-tbody');
+                const rows = Array.from(tbody.querySelectorAll('tr'));
+                const positions = {};
+                rows.forEach(r => {
+                    const name = (r.querySelector('[data-k="name"]')?.value || '').trim();
+                    if(!name) return;
+                    const acceptedRaw = r.querySelector('[data-k="accepted"]')?.value || '';
+                    const shortlistRaw = r.querySelector('[data-k="shortlist"]')?.value || '';
+                    positions[name] = {
+                        accepted: Util.extractFolderId(acceptedRaw),
+                        shortlist: Util.extractFolderId(shortlistRaw),
+                    };
+                });
+
+                const cfg = Util.normalizeCfg({ clientId: id, positions });
+                localStorage.setItem(KEY, JSON.stringify(cfg));
+                location.reload();
             },
             changePos: () => STATE.pos = document.getElementById('pos-select').value,
             addFiles: (fs) => {
@@ -254,7 +360,7 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
                     form.append('metadata', new Blob([JSON.stringify(meta)], {type:'application/json'}));
                     form.append('file', f.file);
                     
-                    fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+                    fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true', {
                         method: 'POST', headers: {'Authorization': 'Bearer ' + STATE.token}, body: form
                     }).then(res => res.json()).then(d => {
                         if(d.error) UI.toast("Lỗi upload: " + d.error.message);
@@ -349,7 +455,75 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
                     el.style.color = "red";
                 }
             },
-            toggleSettings: () => { const m=document.getElementById('settings-modal'); m.style.display=(m.style.display==='flex'?'none':'flex'); },
+            // Settings UI
+            renderSettingsForm: () => {
+                // client id
+                const idEl = document.getElementById('cfg-id');
+                if(idEl) idEl.value = CFG.clientId || '';
+
+                const tbody = document.getElementById('pos-tbody');
+                if(!tbody) return;
+                tbody.innerHTML = '';
+                Object.entries(CFG.positions).forEach(([name, v]) => {
+                    UI.addPosRow(name, v?.accepted || '', v?.shortlist || '');
+                });
+            },
+            addPosRow: (name = '', accepted = '', shortlist = '') => {
+                const tbody = document.getElementById('pos-tbody');
+                if(!tbody) return;
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><input data-k="name" placeholder="VD: Pháp Chế" value="${UI._esc(name)}"></td>
+                    <td><input data-k="accepted" placeholder="Folder URL/ID" value="${UI._esc(accepted)}"></td>
+                    <td><input data-k="shortlist" placeholder="Folder URL/ID" value="${UI._esc(shortlist)}"></td>
+                    <td><button class="btn-danger" title="Xóa" onclick="this.closest('tr').remove()">🗑️</button></td>
+                `;
+                tbody.appendChild(tr);
+            },
+            copyShareLink: async () => {
+                // Build config from current settings form (so you can share without saving first)
+                const id = (document.getElementById('cfg-id').value || '').trim();
+                const tbody = document.getElementById('pos-tbody');
+                const rows = Array.from(tbody.querySelectorAll('tr'));
+                const positions = {};
+                rows.forEach(r => {
+                    const name = (r.querySelector('[data-k="name"]')?.value || '').trim();
+                    if(!name) return;
+                    const acceptedRaw = r.querySelector('[data-k="accepted"]')?.value || '';
+                    const shortlistRaw = r.querySelector('[data-k="shortlist"]')?.value || '';
+                    positions[name] = {
+                        accepted: Util.extractFolderId(acceptedRaw),
+                        shortlist: Util.extractFolderId(shortlistRaw),
+                    };
+                });
+                const cfg = Util.normalizeCfg({ clientId: id, positions });
+                const b64 = encodeURIComponent(Util.b64EncodeUtf8(JSON.stringify(cfg)));
+                const link = location.origin + location.pathname + '?cfg=' + b64;
+
+                try {
+                    await navigator.clipboard.writeText(link);
+                    UI.toast("✅ Đã copy link chia sẻ. Gửi link này cho team, mở link là tự set cấu hình.");
+                } catch {
+                    // Fallback: show prompt
+                    window.prompt("Copy link này để gửi cho team:", link);
+                }
+            },
+            resetCfg: () => {
+                if(!confirm("Reset cấu hình về mặc định? (Sẽ xóa Client ID & folderId trên máy này)")) return;
+                localStorage.removeItem(KEY);
+                location.reload();
+            },
+            onModalBackdrop: (e) => {
+                // close when clicking backdrop
+                if(e.target && e.target.id === 'settings-modal') UI.toggleSettings(false);
+            },
+            _esc: (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'),
+            toggleSettings: (forceOpen) => {
+                const m = document.getElementById('settings-modal');
+                const open = (typeof forceOpen === 'boolean') ? forceOpen : (m.style.display !== 'flex');
+                m.style.display = open ? 'flex' : 'none';
+                if(open) UI.renderSettingsForm();
+            },
             toast: (msg) => { const t=document.getElementById('toast'); t.innerText=msg; t.style.opacity=1; setTimeout(()=>t.style.opacity=0,3000); }
         };
 
