@@ -63,6 +63,7 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
         <div class="brand"><span>HR</span>Match</div>
         <div class="controls">
             <select id="pos-select" onchange="App.changePos()"></select>
+            <button onclick="App.goHome()">🏠 Trang chính</button>
             <button class="btn-primary" onclick="document.getElementById('file-in').click()">➕ Thêm CV</button>
             <button onclick="UI.toggleSettings()">⚙️</button>
         </div>
@@ -75,7 +76,15 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
                 <div style="font-size:3rem">📂</div>
                 <h3>Kéo thả hoặc Chọn CV</h3>
                 <button class="btn-primary" onclick="document.getElementById('file-in').click()">Chọn File</button>
-                <div id="auth-stt" style="margin-top:10px;color:red;font-size:0.9rem">Chưa kết nối Drive</div>
+
+                <div style="margin-top:12px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+                    <button id="btn-connect" onclick="App.connectDrive()">🔗 Kết nối Drive</button>
+                    <button id="btn-resume" class="hidden" onclick="App.resume()">▶️ Tiếp tục</button>
+                    <button id="btn-reset" class="hidden" onclick="App.resetQueue()">🧹 Xóa danh sách</button>
+                </div>
+
+                <div id="queue-stt" style="margin-top:10px;color:#555;font-size:0.9rem"></div>
+                <div id="auth-stt" style="margin-top:6px;color:red;font-size:0.9rem">Chưa kết nối Drive</div>
             </div>
         </div>
         <div id="card-container" class="hidden"></div>
@@ -129,22 +138,75 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
                 dz.ondrop = e => { e.preventDefault(); dz.classList.remove('active'); App.addFiles(e.dataTransfer.files); };
 
                 // Google Init
-                if(CFG.clientId) window.onload = App.gInit;
+                // Không auto-popup khi load trang (dễ bị chặn). Người dùng bấm "Kết nối Drive" để auth.
+                UI.updateHome();
+                UI.setAuthStatus(false);
+
             },
-            gInit: () => {
+            connectDrive: async () => {
+                if(!CFG.clientId) {
+                    UI.toast("Chưa có Google Client ID. Vào ⚙️ để nhập Client ID trước nhé.");
+                    UI.toggleSettings();
+                    return;
+                }
+
+                UI.toast("Đang kết nối Google Drive...");
+                // Đợi Google Identity Services load xong (script async/defer)
+                const start = Date.now();
+                while(!(window.google && google.accounts && google.accounts.oauth2)) {
+                    if(Date.now() - start > 12000) {
+                        UI.toast("Không tải được Google Auth. Kiểm tra mạng / chặn script / adblock.");
+                        return;
+                    }
+                    await new Promise(r => setTimeout(r, 120));
+                }
+
                 try {
-                    google.accounts.oauth2.initTokenClient({
-                        client_id: CFG.clientId,
-                        scope: 'https://www.googleapis.com/auth/drive.file',
-                        callback: (r) => {
-                            if(r.error) return UI.toast("Lỗi Auth: " + r.error);
-                            STATE.token = r.access_token;
-                            document.getElementById('auth-stt').innerText = "✅ Drive Connected";
-                            document.getElementById('auth-stt').style.color = "green";
-                            UI.toast("Đã kết nối Google Drive!");
-                        }
-                    }).requestAccessToken();
-                } catch(e) { console.error(e); }
+                    // Init 1 lần
+                    if(!STATE.tokenClient) {
+                        STATE.tokenClient = google.accounts.oauth2.initTokenClient({
+                            client_id: CFG.clientId,
+                            scope: 'https://www.googleapis.com/auth/drive.file',
+                            callback: (r) => {
+                                if(r.error) {
+                                    UI.setAuthStatus(false, "Lỗi Auth: " + r.error);
+                                    UI.toast("Auth thất bại: " + r.error);
+                                    return;
+                                }
+                                STATE.token = r.access_token;
+                                UI.setAuthStatus(true);
+                                UI.toast("Đã kết nối Google Drive!");
+                            }
+                        });
+                    }
+
+                    // Gọi trong user gesture (click) để tránh bị chặn popup
+                    STATE.tokenClient.requestAccessToken({ prompt: 'consent' });
+                } catch(e) {
+                    console.error(e);
+                    UI.toast("Lỗi khởi tạo Auth. Mở console để xem chi tiết.");
+                }
+            },
+            goHome: () => {
+                document.getElementById('drop-zone').classList.remove('hidden');
+                document.getElementById('card-container').classList.add('hidden');
+                UI.updateHome();
+            },
+            resume: () => {
+                if(STATE.idx >= STATE.files.length) {
+                    UI.toast("Không còn CV nào để tiếp tục.");
+                    UI.updateHome();
+                    return;
+                }
+                document.getElementById('drop-zone').classList.add('hidden');
+                document.getElementById('card-container').classList.remove('hidden');
+                UI.render();
+            },
+            resetQueue: () => {
+                STATE.files = [];
+                STATE.idx = 0;
+                UI.toast("Đã xóa danh sách CV.");
+                App.goHome();
             },
             saveCfg: () => {
                 try {
@@ -158,9 +220,10 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
             addFiles: (fs) => {
                 const arr = Array.from(fs).map(f => ({ file: f, name: f.name, type: f.name.split('.').pop().toLowerCase() }));
                 STATE.files = [...STATE.files, ...arr];
-                document.getElementById('drop-zone').classList.add('hidden');
-                document.getElementById('card-container').classList.remove('hidden');
-                UI.render();
+
+                // Nếu đang ở trang chính thì chuyển sang màn review luôn
+                App.resume();
+                UI.updateHome();
             },
             decide: (type) => {
                 if(STATE.idx >= STATE.files.length) return;
@@ -176,6 +239,14 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
                 const rename = document.getElementById('inp-name').value || f.name;
                 const posData = CFG.positions[STATE.pos];
                 const folderId = type === 'ok' ? posData.accepted : (type === 'star' ? posData.shortlist : null);
+
+                if(type !== 'no') {
+                    if(!folderId) {
+                        UI.toast("Chưa cấu hình Folder Drive cho vị trí này (accepted/shortlist). Vào ⚙️ để set folderId.");
+                    } else if(!STATE.token) {
+                        UI.toast("Chưa kết nối Drive. Bấm 'Kết nối Drive' ở trang chính.");
+                    }
+                }
 
                 if(folderId && STATE.token) {
                     const meta = { name: `[${STATE.pos}] ${rename}`, parents: [folderId] };
@@ -200,7 +271,15 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
                 const c = document.getElementById('card-container');
                 c.innerHTML = '';
                 if(STATE.idx >= STATE.files.length) {
-                    c.innerHTML = `<div style="text-align:center;padding-top:100px"><h2>Hết hồ sơ!</h2><button class="btn-primary" onclick="document.getElementById('file-in').click()">Thêm hồ sơ</button></div>`;
+                    c.innerHTML = `<div style="text-align:center;padding-top:80px">
+                        <h2>Hết hồ sơ!</h2>
+                        <p>Bạn có thể thêm CV mới hoặc quay về trang chính.</p>
+                        <div style="margin-top:14px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+                            <button class="btn-primary" onclick="document.getElementById('file-in').click()">Thêm hồ sơ</button>
+                            <button onclick="App.goHome()">🏠 Về trang chính</button>
+                        </div>
+                    </div>`;
+                    UI.updateHome();
                     return;
                 }
                 const f = STATE.files[STATE.idx];
@@ -231,6 +310,44 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
                     if(e.key==='ArrowLeft') App.decide('no');
                     if(e.key==='ArrowUp') App.decide('star');
                 };
+            },
+            
+            updateHome: () => {
+                const q = document.getElementById('queue-stt');
+                const resumeBtn = document.getElementById('btn-resume');
+                const resetBtn = document.getElementById('btn-reset');
+
+                if(!q || !resumeBtn || !resetBtn) return;
+
+                const total = STATE.files.length;
+                const remaining = Math.max(0, total - STATE.idx);
+
+                if(total === 0) {
+                    q.textContent = '';
+                    resumeBtn.classList.add('hidden');
+                    resetBtn.classList.add('hidden');
+                    return;
+                }
+
+                q.textContent = remaining > 0
+                    ? `Đang có ${remaining}/${total} CV chưa xử lý.`
+                    : `Đã xử lý xong ${total} CV.`;
+
+                if(remaining > 0) resumeBtn.classList.remove('hidden');
+                else resumeBtn.classList.add('hidden');
+
+                resetBtn.classList.remove('hidden');
+            },
+            setAuthStatus: (ok, msg) => {
+                const el = document.getElementById('auth-stt');
+                if(!el) return;
+                if(ok) {
+                    el.innerText = "✅ Drive Connected";
+                    el.style.color = "green";
+                } else {
+                    el.innerText = msg || "Chưa kết nối Drive";
+                    el.style.color = "red";
+                }
             },
             toggleSettings: () => { const m=document.getElementById('settings-modal'); m.style.display=(m.style.display==='flex'?'none':'flex'); },
             toast: (msg) => { const t=document.getElementById('toast'); t.innerText=msg; t.style.opacity=1; setTimeout(()=>t.style.opacity=0,3000); }
