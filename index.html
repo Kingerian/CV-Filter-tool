@@ -70,8 +70,11 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
 <body>
     <header>
         <div class="brand"><span>HR</span>Match</div>
+        
         <div class="controls">
+            <select id="year-select" onchange="App.changeYear()"></select>
             <select id="pos-select" onchange="App.changePos()"></select>
+            <select id="month-select" onchange="App.changeMonth()"></select>
             <button onclick="App.goHome()">🏠 Trang chính</button>
             <button class="btn-primary" onclick="document.getElementById('file-in').click()">➕ Thêm CV</button>
             <button onclick="UI.toggleSettings()">⚙️</button>
@@ -94,6 +97,20 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
 
                 <div id="queue-stt" style="margin-top:10px;color:#555;font-size:0.9rem"></div>
                 <div id="auth-stt" style="margin-top:6px;color:red;font-size:0.9rem">Chưa kết nối Drive</div>
+
+                <div style="margin-top:14px; width:100%; max-width:560px; text-align:left;">
+                    <div style="font-size:0.85rem; color:#666; font-weight:600; margin-bottom:6px;">
+                        Folder Tháng tuyển (dán URL/ID)
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <input id="dest-folder-inp" placeholder="VD: https://drive.google.com/drive/folders/..." style="flex:1; padding:8px; border:1px solid #ddd; border-radius:6px;">
+                        <button onclick="App.saveDestination()">Lưu</button>
+                    </div>
+                    <div class="hint" style="margin-top:6px;">
+                        App sẽ upload ⭐/❤️ vào folder này. Tip: mở folder trên Drive rồi copy URL trên thanh địa chỉ.
+                    </div>
+                    <div id="dest-stt" style="margin-top:6px;color:#555;font-size:0.9rem"></div>
+                </div>
             </div>
         </div>
         <div id="card-container" class="hidden"></div>
@@ -111,44 +128,56 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
             </div>
 
             <div class="input-group">
-                <label>Vị trí & Folder Drive</label>
-                <div style="overflow:auto; max-height:320px;">
-                    <table class="pos-table">
-                        <thead>
-                            <tr>
-                                <th style="min-width:140px;">Vị trí</th>
-                                <th style="min-width:160px;">Accepted folder</th>
-                                <th style="min-width:160px;">Shortlist folder</th>
-                                <th style="width:44px;"></th>
-                            </tr>
-                        </thead>
-                        <tbody id="pos-tbody"></tbody>
-                    </table>
+                <label>Danh sách vị trí</label>
+                <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                    <input id="pos-list" placeholder="VD: Pháp Chế; CSKH; Designer 2D" style="flex:1; min-width:260px;">
+                    <button onclick="UI.fillPosFromSelect()">Lấy từ dropdown</button>
                 </div>
-                <div class="hint">Tip: Bạn có thể dán <b>URL folder Drive</b> hoặc <b>Folder ID</b>. App sẽ tự trích ID.</div>
-                <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
-                    <button onclick="UI.addPosRow()">➕ Thêm vị trí</button>
-                    <button onclick="UI.copyShareLink()">🔗 Tạo link chia sẻ</button>
-                    <button class="btn-danger" onclick="UI.resetCfg()">↩️ Reset cấu hình</button>
-                </div>
+                <div class="hint">Nhập các vị trí, ngăn cách bằng dấu <b>;</b> hoặc xuống dòng. Dropdown trên header sẽ lấy danh sách này.</div>
             </div>
 
-            <div style="text-align:right; display:flex; justify-content:flex-end; gap:10px; flex-wrap:wrap;">
+            <div class="input-group">
+                <label>Danh sách năm tuyển</label>
+                <input id="year-list" placeholder="VD: 2024, 2025, 2026">
+                <div class="hint">Nhập các năm, ngăn cách bằng dấu phẩy. App sẽ hiển thị dropdown năm trên header.</div>
+            </div>
+
+
+            <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+                <button onclick="UI.copyShareLink()">🔗 Tạo link chia sẻ</button>
+                <button class="btn-danger" onclick="UI.resetCfg()">↩️ Reset cấu hình</button>
+            </div>
+
+<div style="text-align:right; display:flex; justify-content:flex-end; gap:10px; flex-wrap:wrap;">
                 <button class="btn-primary" onclick="App.saveCfg()">💾 Lưu</button>
                 <button onclick="UI.toggleSettings()">Đóng</button>
             </div>
         </div>
     </div>
-    </div>
-    
+
     <div id="toast" class="toast"></div>
 
     <script>
-        const KEY = 'hr_match_config';
+// ============================================================
+        // HR MATCH TOOL - Team Flow (Year -> Position -> Month)
+        // - No JSON config needed
+        // - Upload ⭐/❤️ to "Folder Tháng tuyển" (you paste URL/ID)
+        // - Filename is tagged to help later manual sorting
+        // ============================================================
+
+        const KEY = 'hr_match_config_v3';
 
         const DEFAULT_CFG = {
             clientId: '',
-            positions: { "Mặc định": { accepted: "", shortlist: "" } }
+            years: [2024, 2025, 2026],
+            positions: ['Mặc định'],
+            // destination folders by key: "year|position|month" -> folderId
+            destMap: {},
+            // tags used in filename for actions
+            nameTags: {
+                ok: 'Hẹn',
+                star: 'On-hold'
+            }
         };
 
         const Util = {
@@ -162,100 +191,126 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
                 if(m2) return m2[1];
                 const m3 = t.match(/^[a-zA-Z0-9_-]{10,}$/);
                 if(m3) return t;
-                return t; // fallback (still lets user try)
+                return t;
             },
-            b64EncodeUtf8: (str) => btoa(unescape(encodeURIComponent(str))),
-            b64DecodeUtf8: (b64) => decodeURIComponent(escape(atob(b64))),
+            clampInt: (n, min, max) => Math.max(min, Math.min(max, n)),
             normalizeCfg: (cfg) => {
                 const out = { ...DEFAULT_CFG, ...(cfg || {}) };
                 out.clientId = (out.clientId || '').trim();
-                out.positions = out.positions && typeof out.positions === 'object' ? out.positions : { ...DEFAULT_CFG.positions };
-                // normalize each position entry
-                const normPos = {};
-                Object.entries(out.positions).forEach(([k,v]) => {
-                    const name = String(k || '').trim();
-                    if(!name) return;
-                    const obj = v && typeof v === 'object' ? v : {};
-                    normPos[name] = {
-                        accepted: (obj.accepted || '').trim(),
-                        shortlist: (obj.shortlist || '').trim()
-                    };
+
+                // years
+                if(!Array.isArray(out.years)) out.years = [...DEFAULT_CFG.years];
+                out.years = out.years
+                    .map(x => parseInt(x, 10))
+                    .filter(x => Number.isFinite(x) && x >= 2000 && x <= 2100);
+                if(out.years.length === 0) out.years = [...DEFAULT_CFG.years];
+
+                // positions
+                if(Array.isArray(out.positions)) {
+                    out.positions = out.positions.map(x => String(x || '').trim()).filter(Boolean);
+                } else if(out.positions && typeof out.positions === 'object') {
+                    // backward compat: positions was object
+                    out.positions = Object.keys(out.positions).map(x => String(x || '').trim()).filter(Boolean);
+                } else {
+                    out.positions = [...DEFAULT_CFG.positions];
+                }
+                if(out.positions.length === 0) out.positions = ['Mặc định'];
+
+                // destMap
+                out.destMap = (out.destMap && typeof out.destMap === 'object') ? out.destMap : {};
+                const dm = {};
+                Object.entries(out.destMap).forEach(([k,v]) => {
+                    const key = String(k || '').trim();
+                    const val = String(v || '').trim();
+                    if(key && val) dm[key] = val;
                 });
-                if(Object.keys(normPos).length === 0) normPos["Mặc định"] = { accepted:"", shortlist:"" };
-                out.positions = normPos;
+                out.destMap = dm;
+
+                // name tags
+                out.nameTags = (out.nameTags && typeof out.nameTags === 'object') ? out.nameTags : {...DEFAULT_CFG.nameTags};
+                out.nameTags.ok = String(out.nameTags.ok || DEFAULT_CFG.nameTags.ok).trim() || DEFAULT_CFG.nameTags.ok;
+                out.nameTags.star = String(out.nameTags.star || DEFAULT_CFG.nameTags.star).trim() || DEFAULT_CFG.nameTags.star;
+
                 return out;
-            }
+            },
+            keyOf: (year, pos, month) => `${year}|${pos}|${month}`,
+            ensureExt: (baseName, originalName) => {
+                const orig = String(originalName || '');
+                const ext = orig.includes('.') ? orig.split('.').pop() : '';
+                if(!ext) return baseName;
+                const bn = String(baseName || '').trim();
+                if(!bn) return orig;
+                if(bn.toLowerCase().endsWith('.' + ext.toLowerCase())) return bn;
+                if(/\.[a-z0-9]{2,5}$/i.test(bn)) return bn;
+                return bn + '.' + ext;
+            },
+            esc: (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'),
         };
 
-        const importCfgFromUrlIfAny = () => {
+        // Import config from share link (?cfg=...)
+        (() => {
             try {
                 const sp = new URLSearchParams(location.search);
                 const b64 = sp.get('cfg');
                 if(!b64) return;
-                const jsonStr = Util.b64DecodeUtf8(decodeURIComponent(b64));
+                const jsonStr = decodeURIComponent(escape(atob(decodeURIComponent(b64))));
                 const obj = JSON.parse(jsonStr);
                 const normalized = Util.normalizeCfg(obj);
                 localStorage.setItem(KEY, JSON.stringify(normalized));
-                // clean URL (remove cfg param) so people don't keep overwriting by accident
                 sp.delete('cfg');
                 const newUrl = location.pathname + (sp.toString() ? ('?' + sp.toString()) : '') + location.hash;
                 history.replaceState({}, '', newUrl);
             } catch(e) {
                 console.warn("Không import được config từ link:", e);
             }
-        };
-
-        importCfgFromUrlIfAny();
+        })();
 
         let CFG = Util.normalizeCfg(JSON.parse(localStorage.getItem(KEY) || "null"));
 
-        const STATE = { files: [], idx: 0, pos: '', token: null };
+        const STATE = {
+            files: [],
+            idx: 0,
+            token: null,
+            tokenClient: null,
+            year: 2025,
+            month: 12,
+            pos: 'Mặc định',
+        };
 
         const App = {
             init: () => {
-                // UI Setup (settings + positions)
                 UI.renderSettingsForm();
-                const sel = document.getElementById('pos-select');
-                sel.innerHTML = '';
-                Object.keys(CFG.positions).forEach(p => {
-                    let opt = document.createElement('option');
-                    opt.value = p;
-                    opt.innerText = p;
-                    sel.add(opt);
-                });
-                STATE.pos = sel.value || Object.keys(CFG.positions)[0] || 'Mặc định';
-// Drag Drop
+                UI.buildSelectors();
+                UI.updateHome();
+                UI.setAuthStatus(false);
+                UI.loadDestinationToInput();
+
+                // Drag Drop
                 const dz = document.getElementById('drop-zone');
                 dz.ondragover = e => { e.preventDefault(); dz.classList.add('active'); };
                 dz.ondragleave = () => dz.classList.remove('active');
                 dz.ondrop = e => { e.preventDefault(); dz.classList.remove('active'); App.addFiles(e.dataTransfer.files); };
-
-                // Google Init
-                // Không auto-popup khi load trang (dễ bị chặn). Người dùng bấm "Kết nối Drive" để auth.
-                UI.updateHome();
-                UI.setAuthStatus(false);
-
             },
+
             connectDrive: async () => {
                 if(!CFG.clientId) {
                     UI.toast("Chưa có Google Client ID. Vào ⚙️ để nhập Client ID trước nhé.");
-                    UI.toggleSettings();
+                    UI.toggleSettings(true);
                     return;
                 }
 
                 UI.toast("Đang kết nối Google Drive...");
-                // Đợi Google Identity Services load xong (script async/defer)
+
                 const start = Date.now();
                 while(!(window.google && google.accounts && google.accounts.oauth2)) {
                     if(Date.now() - start > 12000) {
-                        UI.toast("Không tải được Google Auth. Kiểm tra mạng / chặn script / adblock.");
+                        UI.toast("Không tải được Google Auth. Kiểm tra mạng / adblock / chặn script.");
                         return;
                     }
                     await new Promise(r => setTimeout(r, 120));
                 }
 
                 try {
-                    // Init 1 lần
                     if(!STATE.tokenClient) {
                         STATE.tokenClient = google.accounts.oauth2.initTokenClient({
                             client_id: CFG.clientId,
@@ -272,14 +327,13 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
                             }
                         });
                     }
-
-                    // Gọi trong user gesture (click) để tránh bị chặn popup
                     STATE.tokenClient.requestAccessToken({ prompt: 'consent' });
                 } catch(e) {
                     console.error(e);
                     UI.toast("Lỗi khởi tạo Auth. Mở console để xem chi tiết.");
                 }
             },
+
             goHome: () => {
                 document.getElementById('drop-zone').classList.remove('hidden');
                 document.getElementById('card-container').classList.add('hidden');
@@ -293,7 +347,7 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
                 }
                 document.getElementById('drop-zone').classList.add('hidden');
                 document.getElementById('card-container').classList.remove('hidden');
-                UI.render();
+                UI.renderCard();
             },
             resetQueue: () => {
                 STATE.files = [];
@@ -301,81 +355,191 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
                 UI.toast("Đã xóa danh sách CV.");
                 App.goHome();
             },
-            saveCfg: () => {
-                // Read from table UI (no JSON needed)
-                const id = (document.getElementById('cfg-id').value || '').trim();
-                const tbody = document.getElementById('pos-tbody');
-                const rows = Array.from(tbody.querySelectorAll('tr'));
-                const positions = {};
-                rows.forEach(r => {
-                    const name = (r.querySelector('[data-k="name"]')?.value || '').trim();
-                    if(!name) return;
-                    const acceptedRaw = r.querySelector('[data-k="accepted"]')?.value || '';
-                    const shortlistRaw = r.querySelector('[data-k="shortlist"]')?.value || '';
-                    positions[name] = {
-                        accepted: Util.extractFolderId(acceptedRaw),
-                        shortlist: Util.extractFolderId(shortlistRaw),
-                    };
-                });
 
-                const cfg = Util.normalizeCfg({ clientId: id, positions });
-                localStorage.setItem(KEY, JSON.stringify(cfg));
-                location.reload();
+            changeYear: () => {
+                const y = parseInt(document.getElementById('year-select').value, 10);
+                if(Number.isFinite(y)) STATE.year = y;
+                UI.loadDestinationToInput();
+                UI.updateHome();
             },
-            changePos: () => STATE.pos = document.getElementById('pos-select').value,
+            changeMonth: () => {
+                const m = parseInt(document.getElementById('month-select').value, 10);
+                if(Number.isFinite(m)) STATE.month = Util.clampInt(m, 1, 12);
+                UI.loadDestinationToInput();
+                UI.updateHome();
+            },
+            changePos: () => {
+                STATE.pos = document.getElementById('pos-select').value || 'Mặc định';
+                UI.loadDestinationToInput();
+                UI.updateHome();
+            },
+
+            getCurrentDestKey: () => Util.keyOf(STATE.year, STATE.pos, STATE.month),
+            getCurrentDestFolder: () => CFG.destMap[App.getCurrentDestKey()] || '',
+
+            saveDestination: () => {
+                const inp = document.getElementById('dest-folder-inp');
+                const raw = (inp?.value || '').trim();
+                const id = Util.extractFolderId(raw);
+
+                if(!id) {
+                    UI.toast("Bạn chưa dán URL/ID folder.");
+                    return;
+                }
+
+                const key = App.getCurrentDestKey();
+                CFG.destMap[key] = id;
+                localStorage.setItem(KEY, JSON.stringify(CFG));
+
+                UI.toast("✅ Đã lưu folder tháng tuyển cho: " + UI.pathText());
+                UI.updateHome();
+            },
+
             addFiles: (fs) => {
-                const arr = Array.from(fs).map(f => ({ file: f, name: f.name, type: f.name.split('.').pop().toLowerCase() }));
+                const arr = Array.from(fs).map(f => ({
+                    file: f,
+                    name: f.name,
+                    type: f.name.split('.').pop().toLowerCase()
+                }));
                 STATE.files = [...STATE.files, ...arr];
 
-                // Nếu đang ở trang chính thì chuyển sang màn review luôn
                 App.resume();
                 UI.updateHome();
             },
+
             decide: (type) => {
                 if(STATE.idx >= STATE.files.length) return;
                 const card = document.getElementById('card-active');
-                
-                // Anim
-                card.style.transform = type === 'ok' ? 'translate(100%, 20px) rotate(10deg)' : 
-                                      (type === 'no' ? 'translate(-100%, 20px) rotate(-10deg)' : 'translateY(-100%)');
+
+                card.style.transform =
+                    type === 'ok' ? 'translate(100%, 20px) rotate(10deg)' :
+                    (type === 'no' ? 'translate(-100%, 20px) rotate(-10deg)' : 'translateY(-100%)');
                 card.style.opacity = 0;
 
-                // Logic
                 const f = STATE.files[STATE.idx];
-                const rename = document.getElementById('inp-name').value || f.name;
-                const posData = CFG.positions[STATE.pos];
-                const folderId = type === 'ok' ? posData.accepted : (type === 'star' ? posData.shortlist : null);
+                const destFolderId = App.getCurrentDestFolder();
 
                 if(type !== 'no') {
-                    if(!folderId) {
-                        UI.toast("Chưa cấu hình Folder Drive cho vị trí này (accepted/shortlist). Vào ⚙️ để set folderId.");
+                    if(!destFolderId) {
+                        UI.toast("Chưa set folder Tháng tuyển cho " + UI.pathText() + ". Dán URL/ID ở trang chính rồi bấm Lưu.");
                     } else if(!STATE.token) {
                         UI.toast("Chưa kết nối Drive. Bấm 'Kết nối Drive' ở trang chính.");
                     }
                 }
 
-                if(folderId && STATE.token) {
-                    const meta = { name: `[${STATE.pos}] ${rename}`, parents: [folderId] };
+                if(destFolderId && STATE.token && type !== 'no') {
+                    const rawName = document.getElementById('inp-name')?.value || f.name;
+                    const safeNameWithExt = Util.ensureExt(rawName, f.name);
+
+                    const tag = (type === 'ok') ? CFG.nameTags.ok : CFG.nameTags.star;
+                    const finalName = `[${STATE.pos}] [${tag}] ${safeNameWithExt}`;
+
+                    const meta = {
+                        name: finalName,
+                        parents: [destFolderId]
+                    };
+
                     const form = new FormData();
-                    form.append('metadata', new Blob([JSON.stringify(meta)], {type:'application/json'}));
+                    form.append('metadata', new Blob([JSON.stringify(meta)], { type: 'application/json' }));
                     form.append('file', f.file);
-                    
+
                     fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true', {
-                        method: 'POST', headers: {'Authorization': 'Bearer ' + STATE.token}, body: form
-                    }).then(res => res.json()).then(d => {
-                        if(d.error) UI.toast("Lỗi upload: " + d.error.message);
-                        else UI.toast("Đã lưu vào Drive!");
+                        method: 'POST',
+                        headers: { 'Authorization': 'Bearer ' + STATE.token },
+                        body: form
+                    })
+                    .then(res => res.json())
+                    .then(d => {
+                        if(d?.error) UI.toast("Lỗi upload: " + d.error.message);
+                        else UI.toast("✅ Đã upload vào Drive (" + UI.pathText() + ")");
+                    })
+                    .catch(err => {
+                        console.error(err);
+                        UI.toast("Lỗi upload (network). Mở console để xem chi tiết.");
                     });
                 }
 
-                setTimeout(() => { STATE.idx++; UI.render(); }, 300);
-            }
+                setTimeout(() => {
+                    STATE.idx++;
+                    UI.renderCard();
+                    UI.updateHome();
+                }, 320);
+            },
+
+            saveCfg: () => {
+                const id = (document.getElementById('cfg-id')?.value || '').trim();
+
+                const posRaw = (document.getElementById('pos-list')?.value || '').trim();
+                const positions = posRaw
+                    ? posRaw.split(/\n|;+/).map(s => s.trim()).filter(Boolean)
+                    : [...CFG.positions];
+
+                const yearRaw = (document.getElementById('year-list')?.value || '').trim();
+                const years = yearRaw
+                    ? yearRaw.split(/[,;\s]+/).map(x => parseInt(x,10)).filter(x => Number.isFinite(x))
+                    : [...CFG.years];
+
+                const next = Util.normalizeCfg({
+                    clientId: id,
+                    years,
+                    positions,
+                    destMap: CFG.destMap,
+                    nameTags: CFG.nameTags
+                });
+
+                localStorage.setItem(KEY, JSON.stringify(next));
+                location.reload();
+            },
         };
 
         const UI = {
-            render: () => {
+            buildSelectors: () => {
+                // Year
+                const ySel = document.getElementById('year-select');
+                ySel.innerHTML = '';
+                CFG.years.forEach(y => {
+                    const opt = document.createElement('option');
+                    opt.value = String(y);
+                    opt.textContent = String(y);
+                    ySel.appendChild(opt);
+                });
+                if(CFG.years.includes(STATE.year)) ySel.value = String(STATE.year);
+                else {
+                    STATE.year = CFG.years[0];
+                    ySel.value = String(STATE.year);
+                }
+
+                // Position
+                const pSel = document.getElementById('pos-select');
+                pSel.innerHTML = '';
+                CFG.positions.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p;
+                    opt.textContent = p;
+                    pSel.appendChild(opt);
+                });
+                if(CFG.positions.includes(STATE.pos)) pSel.value = STATE.pos;
+                else {
+                    STATE.pos = CFG.positions[0] || 'Mặc định';
+                    pSel.value = STATE.pos;
+                }
+
+                // Month
+                const mSel = document.getElementById('month-select');
+                mSel.innerHTML = '';
+                for(let m=1; m<=12; m++) {
+                    const opt = document.createElement('option');
+                    opt.value = String(m);
+                    opt.textContent = "Tháng " + m;
+                    mSel.appendChild(opt);
+                }
+                mSel.value = String(STATE.month);
+            },
+
+            renderCard: () => {
                 const c = document.getElementById('card-container');
                 c.innerHTML = '';
+
                 if(STATE.idx >= STATE.files.length) {
                     c.innerHTML = `<div style="text-align:center;padding-top:80px">
                         <h2>Hết hồ sơ!</h2>
@@ -385,22 +549,34 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
                             <button onclick="App.goHome()">🏠 Về trang chính</button>
                         </div>
                     </div>`;
-                    UI.updateHome();
                     return;
                 }
+
                 const f = STATE.files[STATE.idx];
                 const url = URL.createObjectURL(f.file);
-                
-                let preview = `<div class="no-preview"><div>${f.type.toUpperCase()}</div><a href="${url}" target="_blank" style="color:#aaf">Mở file</a></div>`;
+
+                let preview = `<div class="no-preview"><div>${Util.esc(f.type.toUpperCase())}</div><a href="${url}" target="_blank" style="color:#aaf">Mở file</a></div>`;
                 if(f.type === 'pdf') preview = `<iframe src="${url}#toolbar=0"></iframe>`;
 
                 c.innerHTML = `
                 <div class="card" id="card-active">
                     <div class="preview-pane">${preview}</div>
                     <div class="info-pane">
-                        <h3>${f.name}</h3>
-                        <div class="input-group"><label>Tên ứng viên</label><input id="inp-name" value="${f.name.replace(/\.[^/.]+$/, "")}"></div>
-                        <div class="input-group"><label>Ghi chú</label><textarea rows="3"></textarea></div>
+                        <h3>${Util.esc(f.name)}</h3>
+                        <div class="input-group">
+                            <label>Tên ứng viên</label>
+                            <input id="inp-name" value="${Util.esc(f.name.replace(/\.[^/.]+$/, ""))}">
+                        </div>
+                        <div class="input-group">
+                            <label>Ghi chú</label>
+                            <textarea rows="3" placeholder="(tuỳ chọn) - hiện chưa lưu ra Drive/Sheet"></textarea>
+                        </div>
+
+                        <div class="hint" style="margin-top:4px;">
+                            Upload vào: <b>${UI.pathText()}</b><br>
+                            ⭐ sẽ gắn tag “[${Util.esc(CFG.nameTags.star)}]”, ❤️ gắn tag “[${Util.esc(CFG.nameTags.ok)}]” trong tên file để tiện sort sau.
+                        </div>
+
                         <div class="actions">
                             <button class="btn-circle nope" onclick="App.decide('no')">✖️</button>
                             <button class="btn-circle star" onclick="App.decide('star')">⭐</button>
@@ -408,22 +584,20 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
                         </div>
                     </div>
                 </div>`;
-                
-                // Key listener for this card
+
                 document.onkeydown = (e) => {
                     if(e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-                    if(e.key==='ArrowRight') App.decide('ok');
-                    if(e.key==='ArrowLeft') App.decide('no');
-                    if(e.key==='ArrowUp') App.decide('star');
+                    if(e.key === 'ArrowRight') App.decide('ok');
+                    if(e.key === 'ArrowLeft') App.decide('no');
+                    if(e.key === 'ArrowUp') App.decide('star');
                 };
             },
-            
+
             updateHome: () => {
                 const q = document.getElementById('queue-stt');
                 const resumeBtn = document.getElementById('btn-resume');
                 const resetBtn = document.getElementById('btn-reset');
-
-                if(!q || !resumeBtn || !resetBtn) return;
+                const destStt = document.getElementById('dest-stt');
 
                 const total = STATE.files.length;
                 const remaining = Math.max(0, total - STATE.idx);
@@ -432,99 +606,116 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
                     q.textContent = '';
                     resumeBtn.classList.add('hidden');
                     resetBtn.classList.add('hidden');
-                    return;
+                } else {
+                    q.textContent = remaining > 0
+                        ? `Đang có ${remaining}/${total} CV chưa xử lý.`
+                        : `Đã xử lý xong ${total} CV.`;
+
+                    if(remaining > 0) resumeBtn.classList.remove('hidden');
+                    else resumeBtn.classList.add('hidden');
+
+                    resetBtn.classList.remove('hidden');
                 }
 
-                q.textContent = remaining > 0
-                    ? `Đang có ${remaining}/${total} CV chưa xử lý.`
-                    : `Đã xử lý xong ${total} CV.`;
-
-                if(remaining > 0) resumeBtn.classList.remove('hidden');
-                else resumeBtn.classList.add('hidden');
-
-                resetBtn.classList.remove('hidden');
+                const dest = App.getCurrentDestFolder();
+                if(dest) {
+                    destStt.innerHTML = `Đang chọn: <b>${UI.pathText()}</b> — ✅ Đã set folder`;
+                } else {
+                    destStt.innerHTML = `Đang chọn: <b>${UI.pathText()}</b> — ⚠️ Chưa set folder`;
+                }
             },
+
+            loadDestinationToInput: () => {
+                const inp = document.getElementById('dest-folder-inp');
+                if(!inp) return;
+                inp.value = App.getCurrentDestFolder() || '';
+                UI.updateHome();
+            },
+
+            pathText: () => `${STATE.year} / ${STATE.pos} / Tháng ${STATE.month}`,
+
             setAuthStatus: (ok, msg) => {
                 const el = document.getElementById('auth-stt');
                 if(!el) return;
                 if(ok) {
-                    el.innerText = "✅ Drive Connected";
+                    el.textContent = "✅ Drive Connected";
                     el.style.color = "green";
                 } else {
-                    el.innerText = msg || "Chưa kết nối Drive";
+                    el.textContent = msg || "Chưa kết nối Drive";
                     el.style.color = "red";
                 }
             },
-            // Settings UI
+
             renderSettingsForm: () => {
-                // client id
                 const idEl = document.getElementById('cfg-id');
                 if(idEl) idEl.value = CFG.clientId || '';
 
-                const tbody = document.getElementById('pos-tbody');
-                if(!tbody) return;
-                tbody.innerHTML = '';
-                Object.entries(CFG.positions).forEach(([name, v]) => {
-                    UI.addPosRow(name, v?.accepted || '', v?.shortlist || '');
-                });
+                const posEl = document.getElementById('pos-list');
+                if(posEl) posEl.value = (CFG.positions || []).join('; ');
+
+                const yearEl = document.getElementById('year-list');
+                if(yearEl) yearEl.value = (CFG.years || []).join(', ');
             },
-            addPosRow: (name = '', accepted = '', shortlist = '') => {
-                const tbody = document.getElementById('pos-tbody');
-                if(!tbody) return;
-                const tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td><input data-k="name" placeholder="VD: Pháp Chế" value="${UI._esc(name)}"></td>
-                    <td><input data-k="accepted" placeholder="Folder URL/ID" value="${UI._esc(accepted)}"></td>
-                    <td><input data-k="shortlist" placeholder="Folder URL/ID" value="${UI._esc(shortlist)}"></td>
-                    <td><button class="btn-danger" title="Xóa" onclick="this.closest('tr').remove()">🗑️</button></td>
-                `;
-                tbody.appendChild(tr);
+
+            fillPosFromSelect: () => {
+                const pSel = document.getElementById('pos-select');
+                if(!pSel) return;
+                const values = Array.from(pSel.options).map(o => o.value).filter(Boolean);
+                const posEl = document.getElementById('pos-list');
+                if(posEl) posEl.value = values.join('; ');
+                UI.toast("Đã điền danh sách vị trí từ dropdown.");
             },
+
             copyShareLink: async () => {
-                // Build config from current settings form (so you can share without saving first)
-                const id = (document.getElementById('cfg-id').value || '').trim();
-                const tbody = document.getElementById('pos-tbody');
-                const rows = Array.from(tbody.querySelectorAll('tr'));
-                const positions = {};
-                rows.forEach(r => {
-                    const name = (r.querySelector('[data-k="name"]')?.value || '').trim();
-                    if(!name) return;
-                    const acceptedRaw = r.querySelector('[data-k="accepted"]')?.value || '';
-                    const shortlistRaw = r.querySelector('[data-k="shortlist"]')?.value || '';
-                    positions[name] = {
-                        accepted: Util.extractFolderId(acceptedRaw),
-                        shortlist: Util.extractFolderId(shortlistRaw),
-                    };
+                const id = (document.getElementById('cfg-id')?.value || '').trim();
+                const posRaw = (document.getElementById('pos-list')?.value || '').trim();
+                const positions = posRaw ? posRaw.split(/\n|;+/).map(s => s.trim()).filter(Boolean) : [...CFG.positions];
+
+                const yearRaw = (document.getElementById('year-list')?.value || '').trim();
+                const years = yearRaw ? yearRaw.split(/[,;\s]+/).map(x => parseInt(x,10)).filter(x => Number.isFinite(x)) : [...CFG.years];
+
+                const shareObj = Util.normalizeCfg({
+                    clientId: id,
+                    years,
+                    positions,
+                    destMap: CFG.destMap,
+                    nameTags: CFG.nameTags
                 });
-                const cfg = Util.normalizeCfg({ clientId: id, positions });
-                const b64 = encodeURIComponent(Util.b64EncodeUtf8(JSON.stringify(cfg)));
+
+                const b64 = encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(shareObj)))));
                 const link = location.origin + location.pathname + '?cfg=' + b64;
 
                 try {
                     await navigator.clipboard.writeText(link);
                     UI.toast("✅ Đã copy link chia sẻ. Gửi link này cho team, mở link là tự set cấu hình.");
                 } catch {
-                    // Fallback: show prompt
                     window.prompt("Copy link này để gửi cho team:", link);
                 }
             },
+
             resetCfg: () => {
-                if(!confirm("Reset cấu hình về mặc định? (Sẽ xóa Client ID & folderId trên máy này)")) return;
+                if(!confirm("Reset cấu hình về mặc định? (Sẽ xóa Client ID & cấu hình trên máy này)")) return;
                 localStorage.removeItem(KEY);
                 location.reload();
             },
+
             onModalBackdrop: (e) => {
-                // close when clicking backdrop
                 if(e.target && e.target.id === 'settings-modal') UI.toggleSettings(false);
             },
-            _esc: (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'),
+
             toggleSettings: (forceOpen) => {
                 const m = document.getElementById('settings-modal');
                 const open = (typeof forceOpen === 'boolean') ? forceOpen : (m.style.display !== 'flex');
                 m.style.display = open ? 'flex' : 'none';
                 if(open) UI.renderSettingsForm();
             },
-            toast: (msg) => { const t=document.getElementById('toast'); t.innerText=msg; t.style.opacity=1; setTimeout(()=>t.style.opacity=0,3000); }
+
+            toast: (msg) => {
+                const t = document.getElementById('toast');
+                t.textContent = msg;
+                t.style.opacity = 1;
+                setTimeout(() => t.style.opacity = 0, 3200);
+            },
         };
 
         App.init();
