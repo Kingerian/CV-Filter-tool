@@ -360,7 +360,7 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
                     </div>
 
                     <div class="hint" style="margin-top:12px;">
-                        Tip: Sau khi Trưởng bộ phận duyệt xong, team có thể tự sort thêm <b>On-hold / Hẹn / Reject</b> trong folder Tháng (flow chính vẫn là <b>Năm → Vị trí → Tháng</b>).
+                        Tip: Flow lưu CV theo <b>Năm → Vị trí → Tháng</b>. Các bước sort sau phỏng vấn (nếu có) team sẽ xử lý trực tiếp trong Drive.
                     </div>
                 </section>
 
@@ -522,6 +522,9 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
                 out.nameTags = (out.nameTags && typeof out.nameTags === 'object') ? out.nameTags : {...DEFAULT_CFG.nameTags};
                 out.nameTags.ok = String(out.nameTags.ok || DEFAULT_CFG.nameTags.ok).trim() || DEFAULT_CFG.nameTags.ok;
                 out.nameTags.star = String(out.nameTags.star || DEFAULT_CFG.nameTags.star).trim() || DEFAULT_CFG.nameTags.star;
+                // Migration: older configs used ok='Hẹn', star='On-hold' (legacy). Auto-map to current tags.
+                if (/hẹn|hen/i.test(out.nameTags.ok)) out.nameTags.ok = DEFAULT_CFG.nameTags.ok;
+                if (/on\s*-?\s*hold/i.test(out.nameTags.star)) out.nameTags.star = DEFAULT_CFG.nameTags.star;
 
                 return out;
             },
@@ -566,6 +569,8 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
         })();
 
         let CFG = Util.normalizeCfg(JSON.parse(localStorage.getItem(KEY) || "null"));
+        // Persist any normalization/migrations back to storage (helps team stay consistent)
+        try { localStorage.setItem(KEY, JSON.stringify(CFG)); } catch(e) {}
 
         const STATE = {
             files: [],
@@ -909,7 +914,7 @@ HR MATCH TOOL - GITHUB PAGES VERSION (V2.1 Stable)
                             </div>
 
                             <div class="muted" style="margin-top:10px;">
-                                ⭐ = <b>Cân nhắc</b>, ❤️ = <b>Tiềm năng</b>. App sẽ gắn tag “[${Util.esc(CFG.nameTags.star)}]” / “[${Util.esc(CFG.nameTags.ok)}]” vào tên file để tiện lọc ở giai đoạn sàng lọc ban đầu (On-hold/Hẹn/Reject là bước sort sau khi Trưởng bộ phận xem).
+                                ⭐ = <b>Cân nhắc</b>, ❤️ = <b>Tiềm năng</b>. App sẽ gắn tag “[${Util.esc(CFG.nameTags.star)}]” / “[${Util.esc(CFG.nameTags.ok)}]” vào tên file để tiện lọc ở giai đoạn sàng lọc ban đầu.
                             </div>
                         </div>
 
